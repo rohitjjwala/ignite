@@ -1,0 +1,103 @@
+pipeline {
+    agent {
+        label 'bcc'
+    }
+    tools {
+        maven 'Maven 3.5.3'
+    }
+    parameters {
+        booleanParam(name: 'DEPLOY_BUILD', defaultValue: false, description: 'Deploy build to artifactory')
+        booleanParam(name: 'FAIL_BUILD_SQ', defaultValue: true, description: 'Fail build if Quality Gate fails')
+    }
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '5'))
+        skipDefaultCheckout()
+    }
+
+    stages {
+        stage('Declare vars') {
+            steps {
+                script {
+                    isDevelopBranch = env.BRANCH_NAME.equals('develop');
+                    isReleaseBranch = env.BRANCH_NAME.contains('release');
+                    isFeatureBranch = env.BRANCH_NAME.equals('feature');
+                    pullRequestNumber = env.CHANGE_ID;
+                }
+            }
+        }
+        stage('Checkout') {
+            steps {
+                script {
+                    echo "Checking out branch " + env.BRANCH_NAME
+
+                    if (isReleaseBranch) {
+                        checkout([$class                           : 'GitSCM',
+                                  branches                         : [[name: '*/release/**']],
+                                  doGenerateSubmoduleConfigurations: false,
+                                  extensions                       : [[$class: 'LocalBranch', localBranch: '**']],
+                                  submoduleCfg                     : [],
+                                  userRemoteConfigs                : [[credentialsId: '\t9132a7f1-4b8e-4ba4-8eb4-69f817fddcc8', url: 'https://github.com/rohitjjwala/ignite.git']]])
+                    } else {
+                        checkout scm
+                    }
+                }
+            }
+        }
+        stage('Build & Test') {
+            steps {
+                echo "Building"
+                sh 'mvn clean verify'
+            }
+        }
+        stage('Perform static analysis') {
+            steps {
+                script {
+                    if (pullRequestNumber) {
+                        echo "Updating PR ${pullRequestNumber} with static analysis results"
+
+                        withCredentials([usernamePassword(credentialsId: 'bbgithub_token', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]) {
+                            sh "mvn sonar:sonar -Dsonar.analysis.mode=preview -Dsonar.github.oauth=$PASSWORD -Dsonar.github.pullRequest=$pullRequestNumber"
+                        }
+
+                        echo "Run quality gate analysis for PR ${pullRequestNumber}"
+                        withSonarQubeEnv('bdp-sonarqube') {
+                            sh "mvn sonar:sonar"
+                        }
+                    } else if (isDevelopBranch) {
+                        echo "Performing static analysis"
+                        sh "mvn sonar:sonar"
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            when {
+                expression { return pullRequestNumber && params.FAIL_BUILD_SQ }
+            }
+            steps {
+                script {
+                    timeout(time: 1, unit: 'HOURS') {
+                        def qg = waitForQualityGate()
+                        if (qg.status != 'OK') {
+                            error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning workspace'
+            deleteDir()
+        }
+        failure {
+            emailext subject: 'Build status of job :' + env.JOB_NAME,
+                    body: env.BUILD_URL + ' Failed!',
+                    recipientProviders: [[$class: 'CulpritsRecipientProvider']]
+        }
+    }
+}
