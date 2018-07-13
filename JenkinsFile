@@ -37,7 +37,7 @@ pipeline {
                                   doGenerateSubmoduleConfigurations: false,
                                   extensions                       : [[$class: 'LocalBranch', localBranch: '**']],
                                   submoduleCfg                     : [],
-                                  userRemoteConfigs                : [[credentialsId: '\t9132a7f1-4b8e-4ba4-8eb4-69f817fddcc8', url: 'https://github.com/rohitjjwala/ignite.git']]])
+                                  userRemoteConfigs                : [[credentialsId: 'rohitjjwala_id_token', url: 'https://github.com/rohitjjwala/ignite.git']]])
                     } else {
                         checkout scm
                     }
@@ -56,7 +56,7 @@ pipeline {
                     if (pullRequestNumber) {
                         echo "Updating PR ${pullRequestNumber} with static analysis results"
 
-                        withCredentials([usernamePassword(credentialsId: 'bbgithub_token', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]) {
+                        withCredentials([usernamePassword(credentialsId: 'rohitjjwala_id_token', passwordVariable: 'PASSWORD', usernameVariable: 'USERNAME')]) {
                             sh "mvn sonar:sonar -Dsonar.analysis.mode=preview -Dsonar.github.oauth=$PASSWORD -Dsonar.github.pullRequest=$pullRequestNumber"
                         }
 
